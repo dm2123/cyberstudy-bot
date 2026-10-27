@@ -37,9 +37,35 @@ Run (after setup in README.md):
 
 import os
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import discord
 from discord.ext import commands
+
+
+# --- Render free Web Service health-check (Option A, 2026-10-27) ---------
+# Render Web Services need an HTTP port for their health check, but a
+# Discord bot only calls bot.run() and binds no port — so deploys timed
+# out and failed. This small stdlib-only thread binds $PORT (Render sets
+# it) and answers "OK" on every request, so Render can mark the service
+# Live. It does NOT change any bot behaviour, adds no dependency, and
+# works for every bot that runs this same code with its own token.
+def _start_health_server():
+    port = int(os.environ.get("PORT", "10000"))
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - stdlib name
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"OK")
+
+        def log_message(self, *args):  # keep logs quiet
+            pass
+
+    server = HTTPServer(("0.0.0.0", port), _Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
 
 from channels import ALLOWED_CHANNELS, is_command_allowed
 from knowledge import cyber_answer, doubt_answer, eh_answer, subject_answer
@@ -232,6 +258,7 @@ async def on_ready():
 
 
 def main():
+    _start_health_server()
     token = os.environ.get("DISCORD_BOT_TOKEN")
     if not token:
         print(
